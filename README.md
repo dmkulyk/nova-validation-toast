@@ -12,6 +12,7 @@ This package intercepts Nova's error handling and displays the actual error mess
 
 ### Before (Standard Nova Behavior)
 ![Standard Nova Message](standard_message.png)
+
 *Generic error message that doesn't help users understand what went wrong*
 
 ### Problem (Without Package)
