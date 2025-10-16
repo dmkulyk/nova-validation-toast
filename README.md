@@ -35,6 +35,7 @@ This package intercepts Nova's error handling and displays the actual error mess
 - **🔧 Server Error Handling**: Automatically extracts and displays server validation errors
 - **🌐 Axios Interceptors**: Hooks into Nova's requests to catch and display errors
 - **⚙️ Configurable**: Easy to extend with additional error patterns
+- **✅ Laravel 10, 11 & 12 Compatible**: Works with Laravel 10.x, 11.x, and 12.x
 - **✅ Nova 4 & 5 Compatible**: Works with both Nova 4.x and 5.x
 
 ## 📦 Installation
