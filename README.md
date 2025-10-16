@@ -11,17 +11,17 @@ By default, Laravel Nova shows only a generic **"There was a problem submitting 
 This package intercepts Nova's error handling and displays the actual error messages directly in toast notifications. Now users can see specific validation errors like "Database operation failed" or field-specific validation messages right in the UI, without the second generic toast message.
 
 ### Before (Standard Nova Behavior)
-![Standard Nova Message](standard_message.png)
+![Standard Nova Message](images/standard_message.png)
 
 *Generic error message that doesn't help users understand what went wrong*
 
 ### Problem (Without Package)
-![Two Toast Messages](two_toasts.png)
+![Two Toast Messages](images/two_toasts.png)
 
 *Users see both generic and specific messages, creating confusion*
 
 ### After (With Nova Validation Toast)
-![Nova Validation Toast Demo](screenshot.png)
+![Nova Validation Toast Demo](images/screenshot.png)
 
 *Clean, specific error messages that help users understand and fix validation errors*
 
