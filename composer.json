@@ -40,7 +40,5 @@
                 "Dmkulyk\\NovaValidationToast\\NovaValidationToastServiceProvider"
             ]
         }
-    },
-    "minimum-stability": "dev",
-    "prefer-stable": true
+    }
 }
