@@ -16,10 +16,12 @@ This package intercepts Nova's error handling and displays the actual error mess
 
 ### Problem (Without Package)
 ![Two Toast Messages](two_toasts.png)
+
 *Users see both generic and specific messages, creating confusion*
 
 ### After (With Nova Validation Toast)
 ![Nova Validation Toast Demo](screenshot.png)
+
 *Clean, specific error messages that help users understand and fix validation errors*
 
 ## ✨ Features
