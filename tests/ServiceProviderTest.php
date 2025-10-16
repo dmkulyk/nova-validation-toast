@@ -16,7 +16,7 @@ class ServiceProviderTest extends TestCase
     public function it_can_resolve_the_service_provider()
     {
         $provider = $this->app->getProvider(\Dmkulyk\NovaValidationToast\NovaValidationToastServiceProvider::class);
-        
+
         $this->assertInstanceOf(
             \Dmkulyk\NovaValidationToast\NovaValidationToastServiceProvider::class,
             $provider
