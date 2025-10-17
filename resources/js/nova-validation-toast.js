@@ -62,11 +62,18 @@ Nova.booting(() => {
         ax.interceptors.response.use(
             r => r,
             (error) => {
-                const res = error?.response;
-                if (res && !res.config?.__novaToastProcessed) {
-                    res.config = res.config || {};
-                    res.config.__novaToastProcessed = true;
-                    showServerErrors(res);
+                try {
+                    // Safely access error properties with proper null checks
+                    if (error && typeof error === 'object' && error.response) {
+                        const res = error.response;
+                        if (res && !res.config?.__novaToastProcessed) {
+                            res.config = res.config || {};
+                            res.config.__novaToastProcessed = true;
+                            showServerErrors(res);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Nova Toast: Error in response interceptor', e);
                 }
                 return Promise.reject(error);
             }
@@ -90,9 +97,16 @@ Nova.booting(() => {
     if (typeof Nova.request === 'function' && !Nova.__requestWrappedForToast) {
         const origReq = Nova.request.bind(Nova);
         Nova.request = (...args) => {
-            const ax = origReq(...args);
-            installInterceptor(ax, 'Nova.request() (wrapped)');
-            return ax;
+            try {
+                const ax = origReq(...args);
+                if (ax && typeof ax === 'object') {
+                    installInterceptor(ax, 'Nova.request() (wrapped)');
+                }
+                return ax;
+            } catch (e) {
+                console.error('Nova Toast: Error wrapping Nova.request', e);
+                return origReq(...args);
+            }
         };
         Nova.__requestWrappedForToast = true;
     }
