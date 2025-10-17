@@ -23,12 +23,20 @@ Nova.booting(() => {
     }
 
     Nova.error = (msg) => {
+        console.debug('Nova Toast: Nova.error called with:', msg);
         if (suppressNextToast) {
+            console.debug('Nova Toast: Suppressing toast (our own emit)');
             suppressNextToast = false;
             return;
         }
         const s = normalizeString(msg);
-        if (s === normalizeString(KNOWN_ERRORS.formSubmit)) return;
+        const knownFormSubmit = normalizeString(KNOWN_ERRORS.formSubmit);
+        console.debug('Nova Toast: Comparing:', s, 'vs', knownFormSubmit);
+        if (s === knownFormSubmit) {
+            console.debug('Nova Toast: Suppressing known form submit error');
+            return;
+        }
+        console.debug('Nova Toast: Emitting toast for message:', msg);
         emitToastOnce(msg);
     };
 
@@ -94,12 +102,19 @@ Nova.booting(() => {
 
     // Eagerly install on Nova.request and window.axios
     try {
-        installInterceptor(Nova.request?.(), 'Nova.request() (eager)');
+        const novaAxios = Nova.request?.();
+        if (novaAxios) {
+            console.debug('Nova Toast: Attempting eager install on Nova.request()', novaAxios);
+            installInterceptor(novaAxios, 'Nova.request() (eager)');
+        }
     } catch (e) {
         console.error('Nova Toast: Failed to install interceptor on Nova.request', e);
     }
     try {
-        if (window.axios) installInterceptor(window.axios, 'window.axios');
+        if (window.axios) {
+            console.debug('Nova Toast: Installing on window.axios', window.axios);
+            installInterceptor(window.axios, 'window.axios');
+        }
     } catch (e) {
         console.error('Nova Toast: Failed to install interceptor on window.axios', e);
     }
@@ -131,5 +146,23 @@ Nova.booting(() => {
         Nova.__requestWrappedForToast = true;
     }
 
+    // Additional fallback: Hook into Nova's global error handling more directly
+    // Listen for any axios instances that get created and try to intercept them
+    const originalAxiosCreate = window.axios?.create;
+    if (originalAxiosCreate) {
+        window.axios.create = function(...args) {
+            const instance = originalAxiosCreate.apply(this, args);
+            console.debug('Nova Toast: New axios instance created, installing interceptor', instance);
+            installInterceptor(instance, 'axios.create()');
+            return instance;
+        };
+    }
+
+    // Try to hook into any existing Nova store or global state
+    if (window.Nova && window.Nova.store) {
+        console.debug('Nova Toast: Found Nova.store, attempting to hook into state changes');
+    }
+
     window.__novaToastPatchLoaded = true;
+    console.debug('Nova Toast: Package loaded successfully');
 });
