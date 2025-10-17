@@ -59,26 +59,37 @@ Nova.booting(() => {
 
     function installInterceptor(ax, label = 'unknown') {
         if (!ax || ax.__novaToastInstalled) return;
-        ax.interceptors.response.use(
-            r => r,
-            (error) => {
-                try {
-                    // Safely access error properties with proper null checks
-                    if (error && typeof error === 'object' && error.response) {
-                        const res = error.response;
-                        if (res && !res.config?.__novaToastProcessed) {
-                            res.config = res.config || {};
-                            res.config.__novaToastProcessed = true;
-                            showServerErrors(res);
+        
+        // Validate that ax has the required interceptors structure
+        if (!ax.interceptors || !ax.interceptors.response || typeof ax.interceptors.response.use !== 'function') {
+            console.warn(`Nova Toast: Cannot install interceptor on ${label} - missing interceptors.response.use`);
+            return;
+        }
+
+        try {
+            ax.interceptors.response.use(
+                r => r,
+                (error) => {
+                    try {
+                        // Safely access error properties with proper null checks
+                        if (error && typeof error === 'object' && error.response) {
+                            const res = error.response;
+                            if (res && !res.config?.__novaToastProcessed) {
+                                res.config = res.config || {};
+                                res.config.__novaToastProcessed = true;
+                                showServerErrors(res);
+                            }
                         }
+                    } catch (e) {
+                        console.warn('Nova Toast: Error in response interceptor', e);
                     }
-                } catch (e) {
-                    console.warn('Nova Toast: Error in response interceptor', e);
+                    return Promise.reject(error);
                 }
-                return Promise.reject(error);
-            }
-        );
-        ax.__novaToastInstalled = true;
+            );
+            ax.__novaToastInstalled = true;
+        } catch (e) {
+            console.error(`Nova Toast: Failed to install interceptor on ${label}`, e);
+        }
     }
 
     // Eagerly install on Nova.request and window.axios
@@ -99,13 +110,22 @@ Nova.booting(() => {
         Nova.request = (...args) => {
             try {
                 const ax = origReq(...args);
-                if (ax && typeof ax === 'object') {
+                // More defensive check for axios instance
+                if (ax && typeof ax === 'object' && ax.interceptors && ax.interceptors.response) {
                     installInterceptor(ax, 'Nova.request() (wrapped)');
+                } else if (ax) {
+                    console.debug('Nova Toast: Nova.request() returned object without interceptors', ax);
                 }
                 return ax;
             } catch (e) {
                 console.error('Nova Toast: Error wrapping Nova.request', e);
-                return origReq(...args);
+                // Return original request to prevent breaking Nova
+                try {
+                    return origReq(...args);
+                } catch (fallbackError) {
+                    console.error('Nova Toast: Fallback also failed', fallbackError);
+                    throw e; // Re-throw original error
+                }
             }
         };
         Nova.__requestWrappedForToast = true;
