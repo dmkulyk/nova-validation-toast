@@ -2,7 +2,7 @@
 
 All notable changes to `nova-validation-toast` will be documented in this file.
 
-## [1.0.1] - 2025-10-20
+## [1.0.9] - 2025-10-20
 
 ### Fixed
 - Prevent TypeError when installing axios interceptors by adding defensive checks for missing `interceptors.response.use` and handling axios function-shaped instances
