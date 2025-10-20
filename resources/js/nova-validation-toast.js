@@ -1,168 +1,179 @@
 Nova.booting(() => {
-    const DEDUP_WINDOW_MS = 2000;
-    const originalError = Nova.error.bind(Nova);
-    const lastToast = { msg: '', at: 0 };
+  const DEDUP_WINDOW_MS = 2000; // prevent showing identical toast in a tight window
+  const GENERIC = 'there was a problem submitting the form';
 
-    const KNOWN_ERRORS = {
-        formSubmit: 'there was a problem submitting the form',
-        // Add more known error strings here as needed
+  const KNOWN_ERRORS = {
+    formSubmit: 'there was a problem submitting the form',
+    // Add more known error strings here as needed
+  };
+
+  const normalize = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+  const originalError = typeof Nova.error === 'function' ? Nova.error.bind(Nova) : (msg) => console.error(msg);
+
+  // Dedupe + re-entrancy state
+  const lastToast = { msg: '', at: 0 };
+  let suppressNextToast = false;
+
+  // Most recent extracted messages from a server validation/response error
+  const LAST = { msgs: [], at: 0, emittedAt: 0 };
+
+  function unique(arr) {
+    return Array.from(new Set(arr.map((v) => String(v || '').trim()).filter(Boolean)));
+  }
+
+  // Rich, defensive message extraction
+  function extractMessages(data) {
+    const out = [];
+    const push = (v) => {
+      if (v == null) return;
+      if (Array.isArray(v)) { v.forEach(push); return; }
+      if (typeof v === 'string') out.push(v);
+    };
+    const collectErrorsObject = (obj) => {
+      if (!obj || typeof obj !== 'object') return;
+      for (const v of Object.values(obj)) push(v);
     };
 
-    const normalizeString = s => String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (data && typeof data === 'object') {
+      // Laravel-style
+      if (data.errors && typeof data.errors === 'object' && !Array.isArray(data.errors)) collectErrorsObject(data.errors);
+      if (Array.isArray(data.errors)) push(data.errors);
 
-    let suppressNextToast = false;
-    function emitToastOnce(raw) {
-        const msg = String(raw || '').trim();
-        if (!msg) return;
-        const now = Date.now();
-        if (msg === lastToast.msg && (now - lastToast.at) < DEDUP_WINDOW_MS) return;
-        lastToast.msg = msg;
-        lastToast.at = now;
-        suppressNextToast = true;
-        originalError(msg);
+      // Common fields
+      push(data.message);
+      push(data.error);
+      push(data.detail);
+      push(data.title);
+
+      // Nested envelope
+      if (data.data && typeof data.data === 'object') {
+        const inner = data.data;
+        if (inner.errors && typeof inner.errors === 'object' && !Array.isArray(inner.errors)) collectErrorsObject(inner.errors);
+        if (Array.isArray(inner.errors)) push(inner.errors);
+        push(inner.message);
+        push(inner.error);
+      }
     }
+
+    // Filter boilerplate placeholders
+    const blacklist = [normalize(GENERIC), 'the given data was invalid.', 'unprocessable content', 'unprocessable entity'];
+    return unique(out.filter((m) => {
+      const nm = normalize(m);
+      return !blacklist.some((b) => nm === b || (b && nm.includes(b)));
+    }));
+  }
+
+  // Single-shot toast emitter with dedupe + re-entrancy guard
+  function emitToastOnce(raw) {
+    const msg = String(raw || '').trim();
+    if (!msg) return;
+    const now = Date.now();
+    if (msg === lastToast.msg && (now - lastToast.at) < DEDUP_WINDOW_MS) return;
+    lastToast.msg = msg;
+    lastToast.at = now;
+    LAST.emittedAt = now;
+    suppressNextToast = true; // prevent our own call from echoing back through Nova.error
+    originalError(msg);
+  }
+
+  // Nova.error wrapper: replace generic with field messages when we have them; otherwise, dedupe+emit
+  function wrapNovaError() {
+    if (Nova.__nvErrWrapped || typeof Nova.error !== 'function') return;
 
     Nova.error = (msg) => {
-        console.debug('Nova Toast: Nova.error called with:', msg);
-        if (suppressNextToast) {
-            console.debug('Nova Toast: Suppressing toast (our own emit)');
-            suppressNextToast = false;
-            return;
+      if (suppressNextToast) { // one-shot suppression for our own emit
+        suppressNextToast = false;
+        return;
+      }
+
+      const s = normalize(msg);
+      const isGeneric = s && (s === normalize(GENERIC) || s.includes('problem submitting the form') || s.includes('submitting the form'));
+
+      if (isGeneric) {
+        // If we captured real field messages very recently, replace the generic with them.
+        if (LAST.msgs.length && Date.now() - LAST.at < 6000) {
+          if (LAST.emittedAt && Date.now() - LAST.emittedAt <= 1500) return; // avoid echoing our own recent emit
+          LAST.emittedAt = Date.now();
+          return emitToastOnce(LAST.msgs.join('\n'));
         }
-        const s = normalizeString(msg);
-        const knownFormSubmit = normalizeString(KNOWN_ERRORS.formSubmit);
-        console.debug('Nova Toast: Comparing:', s, 'vs', knownFormSubmit);
-        if (s === knownFormSubmit) {
-            console.debug('Nova Toast: Suppressing known form submit error');
-            return;
-        }
-        console.debug('Nova Toast: Emitting toast for message:', msg);
-        emitToastOnce(msg);
+      }
+
+      // Non-generic (or no recent LAST): just apply dedupe
+      return emitToastOnce(String(msg ?? ''));
     };
 
-    function uniq(arr) {
-        return Array.from(new Set(arr.map(v => String(v || '').trim()).filter(Boolean)));
-    }
+    Nova.__nvErrWrapped = true;
+  }
 
-    function extractErrorMessages(data) {
-        const msgs = (data?.errors && typeof data.errors === 'object')
-            ? Object.values(data.errors).reduce((acc, v) => {
-                if (Array.isArray(v)) acc.push(...v);
-                else if (typeof v === 'string') acc.push(v);
-                return acc;
-            }, [])
-            : [];
-        if (typeof data?.message === 'string') msgs.push(data.message);
-        return uniq(msgs);
-    }
-
-    function showServerErrors(res) {
-        const data = res?.data;
-        if (!data || typeof data !== 'object') return false;
-        const msgs = extractErrorMessages(data);
-        if (!msgs.length) return false;
-        emitToastOnce(msgs.join('\n'));
-        return true;
-    }
-
-    function installInterceptor(ax, label = 'unknown') {
-        if (!ax || ax.__novaToastInstalled) return;
-        
-        // Validate that ax has the required interceptors structure
-        if (!ax.interceptors || !ax.interceptors.response || typeof ax.interceptors.response.use !== 'function') {
-            console.warn(`Nova Toast: Cannot install interceptor on ${label} - missing interceptors.response.use`);
-            return;
-        }
-
-        try {
-            ax.interceptors.response.use(
-                r => r,
-                (error) => {
-                    try {
-                        // Safely access error properties with proper null checks
-                        if (error && typeof error === 'object' && error.response) {
-                            const res = error.response;
-                            if (res && !res.config?.__novaToastProcessed) {
-                                res.config = res.config || {};
-                                res.config.__novaToastProcessed = true;
-                                showServerErrors(res);
-                            }
-                        }
-                    } catch (e) {
-                        console.warn('Nova Toast: Error in response interceptor', e);
-                    }
-                    return Promise.reject(error);
-                }
-            );
-            ax.__novaToastInstalled = true;
-        } catch (e) {
-            console.error(`Nova Toast: Failed to install interceptor on ${label}`, e);
-        }
-    }
-
-    // Eagerly install on Nova.request and window.axios
+  // Attach a single axios response interceptor to an instance
+  function attachAxiosInterceptor(instance) {
     try {
-        const novaAxios = Nova.request?.();
-        if (novaAxios) {
-            console.debug('Nova Toast: Attempting eager install on Nova.request()', novaAxios);
-            installInterceptor(novaAxios, 'Nova.request() (eager)');
-        }
-    } catch (e) {
-        console.error('Nova Toast: Failed to install interceptor on Nova.request', e);
-    }
-    try {
-        if (window.axios) {
-            console.debug('Nova Toast: Installing on window.axios', window.axios);
-            installInterceptor(window.axios, 'window.axios');
-        }
-    } catch (e) {
-        console.error('Nova Toast: Failed to install interceptor on window.axios', e);
-    }
+      const ax = instance || (typeof Nova.request === 'function' ? Nova.request() : (window.axios || null));
+      if (!ax || ax.__nvToast) return;
+      if (!ax.interceptors || !ax.interceptors.response || typeof ax.interceptors.response.use !== 'function') return;
 
-    // Wrap Nova.request to always install interceptor
-    if (typeof Nova.request === 'function' && !Nova.__requestWrappedForToast) {
-        const origReq = Nova.request.bind(Nova);
-        Nova.request = (...args) => {
-            try {
-                const ax = origReq(...args);
-                // More defensive check for axios instance
-                if (ax && typeof ax === 'object' && ax.interceptors && ax.interceptors.response) {
-                    installInterceptor(ax, 'Nova.request() (wrapped)');
-                } else if (ax) {
-                    console.debug('Nova Toast: Nova.request() returned object without interceptors', ax);
+      ax.interceptors.response.use(
+        (r) => r,
+        (err) => {
+          try {
+            const res = err && err.response;
+            if (res && res.data) {
+              // Per-response processed guard to avoid double handling of the same response
+              if (!res.config) res.config = {};
+              if (!res.config.__novaToastProcessed) {
+                res.config.__novaToastProcessed = true;
+
+                const msgs = extractMessages(res.data);
+                if (msgs.length) {
+                  LAST.msgs = msgs;
+                  LAST.at = Date.now();
+                  emitToastOnce(msgs.join('\n'));
                 }
-                return ax;
-            } catch (e) {
-                console.error('Nova Toast: Error wrapping Nova.request', e);
-                // Return original request to prevent breaking Nova
-                try {
-                    return origReq(...args);
-                } catch (fallbackError) {
-                    console.error('Nova Toast: Fallback also failed', fallbackError);
-                    throw e; // Re-throw original error
-                }
+              }
             }
-        };
-        Nova.__requestWrappedForToast = true;
-    }
+          } catch (_) { /* ignore */ }
+          return Promise.reject(err);
+        }
+      );
 
-    // Additional fallback: Hook into Nova's global error handling more directly
-    // Listen for any axios instances that get created and try to intercept them
-    const originalAxiosCreate = window.axios?.create;
-    if (originalAxiosCreate) {
-        window.axios.create = function(...args) {
-            const instance = originalAxiosCreate.apply(this, args);
-            console.debug('Nova Toast: New axios instance created, installing interceptor', instance);
-            installInterceptor(instance, 'axios.create()');
-            return instance;
-        };
-    }
+      ax.__nvToast = true;
+    } catch (_) { /* ignore */ }
+  }
 
-    // Try to hook into any existing Nova store or global state
-    if (window.Nova && window.Nova.store) {
-        console.debug('Nova Toast: Found Nova.store, attempting to hook into state changes');
-    }
+  // Ensure we always attach to the axios instance Nova really uses
+  function wrapNovaRequest() {
+    if (Nova.__nvReqWrapped || typeof Nova.request !== 'function') return;
+    const orig = Nova.request.bind(Nova);
+    Nova.request = (...args) => {
+      const ax = orig(...args);
+      try { attachAxiosInterceptor(ax); } catch (_) { /* ignore */ }
+      return ax;
+    };
+    Nova.__nvReqWrapped = true;
+  }
 
-    window.__novaToastPatchLoaded = true;
-    console.debug('Nova Toast: Package loaded successfully');
+  // Eager installs on present instances
+  try { attachAxiosInterceptor(); } catch (_) { /* ignore */ }
+
+  // Also patch future axios instances created via window.axios.create
+  try {
+    if (window.axios && typeof window.axios.create === 'function' && !window.axios.__nvCreateWrapped) {
+      const origCreate = window.axios.create.bind(window.axios);
+      window.axios.create = (...args) => {
+        const inst = origCreate(...args);
+        try { attachAxiosInterceptor(inst); } catch (_) { /* ignore */ }
+        return inst;
+      };
+      window.axios.__nvCreateWrapped = true;
+    }
+  } catch (_) { /* ignore */ }
+
+  // Always ensure Nova.request() returns are patched going forward
+  wrapNovaRequest();
+
+  // Wrap Nova.error last so our emit/dedupe behavior is authoritative
+  wrapNovaError();
+
+  window.__novaToastPatchLoaded = true;
 });
