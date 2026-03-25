@@ -1,5 +1,5 @@
 {
-    "name": "dmkulyk/nova-validation-toast",
+    "name": "cybetic/nova-validation-toast",
     "description": "Enhanced validation toast messages for Laravel Nova with deduplication and improved error handling",
     "keywords": [
         "laravel",
