@@ -128,7 +128,9 @@ Nova.booting(() => {
                 if (msgs.length) {
                   LAST.msgs = msgs;
                   LAST.at = Date.now();
-                  emitToastOnce(msgs.join('\n'));
+                  msgs.forEach(msg => {
+                    emitToastOnce(msg);
+                  });
                 }
               }
             }
